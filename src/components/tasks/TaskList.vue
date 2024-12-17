@@ -56,55 +56,55 @@
                     :key="task.id"
                     class="bg-white p-4 rounded-lg shadow"
                 >
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-4">
-                        <input 
-                            type="checkbox"
-                            :checked="task.completed"
-                            @change="toggleTaskStatus(task)"
-                        >
-                        <h3 class="font-semibold" :class="{ 'line-through': task.completed }">
-                            {{ task.title }}
-                        </h3>
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-4">
+                            <input 
+                                type="checkbox"
+                                :checked="task.completed"
+                                @change="toggleTaskStatus(task)"
+                            >
+                            <h3 class="font-semibold" :class="{ 'line-through': task.completed }">
+                                {{ task.title }}
+                            </h3>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button 
+                                @click="editTask(task)"
+                                class="text-blue-500 hover:text-blue-700"
+                            >
+                                Edit
+                            </button>
+                            <button 
+                                @click="deleteTask(task.id)"
+                                class="text-red-500 hover:text-red-700"
+                            >
+                                Delete
+                            </button>
+                        </div>
                     </div>
-                    <div class="flex space-x-2">
-                        <button 
-                            @click="editTask(task)"
-                            class="text-blue-500 hover:text-blue-700"
-                        >
-                            Edit
-                        </button>
-                        <button 
-                            @click="deleteTask(task.id)"
-                            class="text-red-500 hover:text-red-700"
-                        >
-                            Delete
-                        </button>
-                    </div>
-                </div>
-                <p v-if="task.description" class="text-gray-600 mt-2">{{ task.description }}</p>
-                <div class="mt-2 flex items-center space-x-2">
-                    <span 
-                        class="px-2 py-1 rounded text-sm"
-                        :class="{
-                            'bg-red-100 text-red-800': task.priority === 'high',
-                            'bg-yellow-100 text-yellow-800': task.priority === 'medium',
-                            'bg-green-100 text-green-800': task.priority === 'low'
-                        }"
-                    >
-                        {{ task.priority }}
-                    </span>
-                    <div v-if="task.labels && task.labels.length > 0" class="flex space-x-1">
+                    <p v-if="task.description" class="text-gray-600 mt-2">{{ task.description }}</p>
+                    <div class="mt-2 flex items-center space-x-2">
                         <span 
-                            v-for="label in task.labels"
-                            :key="label"
-                            class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-sm"
+                            class="px-2 py-1 rounded text-sm"
+                            :class="{
+                                'bg-red-100 text-red-800': task.priority === 'high',
+                                'bg-yellow-100 text-yellow-800': task.priority === 'medium',
+                                'bg-green-100 text-green-800': task.priority === 'low'
+                            }"
                         >
-                            {{ label }}
+                            {{ task.priority }}
                         </span>
+                        <div v-if="task.labels && task.labels.length > 0" class="flex space-x-1">
+                            <span 
+                                v-for="label in task.labels"
+                                :key="label"
+                                class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-sm"
+                            >
+                                {{ label }}
+                            </span>
+                        </div>
                     </div>
                 </div>
-            </div>
             </div>
             <div v-else class="text-center text-gray-500 py-8">
                 No tasks found
@@ -163,11 +163,10 @@
                             <option :value="''">No parent task</option>
                             <template v-for="task in availableParentTasks" :key="task.id">
                                 <option :value="task.id">{{ task.title }}</option>
-                                <template v-for="child in task.children" :key="child.id">
-                                    <option :value="child.id">─› {{ child.title }}</option>
-                                    <template v-for="grandChild in child.children" :key="grandChild.id">
-                                        <option :value="grandChild.id">──› {{ grandChild.title }}</option>
-                                    </template>
+                                <template v-for="childOption in getNestedOptions(task)" :key="childOption.id">
+                                    <option :value="childOption.id">
+                                        {{ '─'.repeat(childOption.level) }}› {{ childOption.title }}
+                                    </option>
                                 </template>
                             </template>
                         </select>
@@ -210,6 +209,7 @@ const editingTask = ref(null);
 const labelInput = ref('');
 const isLoading = ref(false);
 const error = ref('');
+const allTasksHierarchy = ref([]);
 
 const taskForm = ref({
     title: '',
@@ -218,6 +218,17 @@ const taskForm = ref({
     labels: [],
     parent_id: ''
 });
+
+const getNestedOptions = (task, level = 1) => {
+    let options = [];
+    if (task.children?.length) {
+        task.children.forEach(child => {
+            options.push({ ...child, level });
+            options = options.concat(getNestedOptions(child, level + 1));
+        });
+    }
+    return options;
+};
 
 const buildTaskHierarchy = (tasks, excludeId = null) => {
     if (!tasks?.length) return [];
@@ -235,14 +246,17 @@ const buildTaskHierarchy = (tasks, excludeId = null) => {
         return false;
     };
 
+    // Filter out the task being edited and its descendants
     const validTasks = tasks.filter(task => 
         task.id !== excludeId && !isDescendantOf(task, excludeId)
     );
   
+    // Create nodes for all tasks
     validTasks.forEach(task => {
         taskMap.set(task.id, { ...task, children: [] });
     });
   
+    // Build the hierarchy
     validTasks.forEach(task => {
         const node = taskMap.get(task.id);
         if (task.parent_id && taskMap.has(task.parent_id)) {
@@ -256,20 +270,13 @@ const buildTaskHierarchy = (tasks, excludeId = null) => {
     return roots;
 };
 
+// Modified to use allTasksHierarchy instead of filtered tasks
 const availableParentTasks = computed(() => {
-    const filteredTasks = taskStore.filters.priority || 
-                         taskStore.filters.completed || 
-                         taskStore.filters.search
-        ? taskStore.tasks
-        : taskStore.allTasks;
-
     return buildTaskHierarchy(
-        filteredTasks,
+        taskStore.allTasks,  // Use all tasks instead of filtered ones
         editingTask.value?.id
     );
 });
-
-taskStore.allTasks = [];
 
 onMounted(async () => {
     if (!authStore.isAuthenticated) {
@@ -279,7 +286,10 @@ onMounted(async () => {
     try {
         isLoading.value = true;
         await taskStore.fetchTasks();
+        // Store all tasks separately
         taskStore.allTasks = [...taskStore.tasks];
+        // Build initial hierarchy
+        allTasksHierarchy.value = buildTaskHierarchy(taskStore.allTasks);
     } catch (err) {
         console.error('Error fetching tasks:', err);
         error.value = 'Failed to load tasks';
@@ -293,7 +303,8 @@ const resetForm = () => {
         title: '',
         description: '',
         priority: 'medium',
-        labels: []
+        labels: [],
+        parent_id: ''
     };
     labelInput.value = '';
     editingTask.value = null;
@@ -306,13 +317,19 @@ const closeModal = () => {
 
 const handleSubmit = async () => {
     try {
-        console.log('labelInput.value', labelInput.value);
+        console.log('Raw parent_id from form:', taskForm.value.parent_id);
+        console.log('Type of parent_id:', typeof taskForm.value.parent_id);
+        
         const formData = {
             ...taskForm.value,
             labels: labelInput.value,
             completed: false,
-            parent_id: taskForm.value.parent_id || null
+            parent_id: taskForm.value.parent_id ? parseInt(taskForm.value.parent_id, 10) : null
         };
+
+        console.log('Final formData:', formData);
+        console.log('parent_id in formData:', formData.parent_id);
+        console.log('Type of parent_id in formData:', typeof formData.parent_id);
 
         if (editingTask.value) {
             await taskStore.updateTask(editingTask.value.id, formData);
@@ -322,7 +339,10 @@ const handleSubmit = async () => {
         
         showCreateModal.value = false;
         resetForm();
+        
         await taskStore.fetchTasks();
+        taskStore.allTasks = [...taskStore.tasks];
+        allTasksHierarchy.value = buildTaskHierarchy(taskStore.allTasks);
     } catch (error) {
         console.error('Error saving task:', error);
     }
@@ -345,6 +365,10 @@ const deleteTask = async (taskId) => {
     if (confirm('Are you sure you want to delete this task?')) {
         try {
             await taskStore.deleteTask(taskId);
+            // Refresh both filtered and complete task lists after deletion
+            await taskStore.fetchTasks();
+            taskStore.allTasks = [...taskStore.tasks];
+            allTasksHierarchy.value = buildTaskHierarchy(taskStore.allTasks);
         } catch (error) {
             console.error('Error deleting task:', error);
         }
@@ -357,6 +381,10 @@ const toggleTaskStatus = async (task) => {
             ...task,
             completed: !task.completed
         });
+        // Refresh both filtered and complete task lists after status change
+        await taskStore.fetchTasks();
+        taskStore.allTasks = [...taskStore.tasks];
+        allTasksHierarchy.value = buildTaskHierarchy(taskStore.allTasks);
     } catch (error) {
         console.error('Error updating task status:', error);
     }
